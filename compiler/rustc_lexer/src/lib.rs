@@ -68,6 +68,11 @@ pub enum TokenKind {
     /// Any whitespace character sequence.
     Whitespace,
 
+    Frontmatter {
+        has_invalid_preceding_whitespace: bool,
+        unclosed: bool,
+    },
+
     /// An identifier or keyword, e.g. `ident` or `continue`.
     Ident,
 
@@ -361,7 +366,27 @@ impl Cursor<'_> {
             Some(c) => c,
             None => return Token::new(TokenKind::Eof, 0),
         };
+
         let token_kind = match first_char {
+            c if self.frontmatter_allowed && is_whitespace(c) => {
+                let mut last = first_char;
+                while is_whitespace(self.first()) {
+                    let Some(c) = self.bump() else { break; };
+                    last = c;
+                }
+                // invalid frontmatter opening as whitespace preceding it isn't newline.
+                // combine the whitespace and the frontmatter to a single token as we shall
+                // error later.
+                if last != '\n' && self.as_str().starts_with("---") {
+                    self.frontmatter(true)
+                } else {
+                    Whitespace
+                }
+            }
+            _ if self.frontmatter_allowed && self.as_str().starts_with("---") => {
+                // happy path
+                self.frontmatter(false)
+            }
             // Slash, comment or block comment.
             '/' => match self.first() {
                 '/' => self.line_comment(),
@@ -467,6 +492,41 @@ impl Cursor<'_> {
         let res = Token::new(token_kind, self.pos_within_token());
         self.reset_pos_within_token();
         res
+    }
+
+    fn frontmatter(&mut self, has_invalid_preceding_whitespace: bool) -> TokenKind {
+        let pos = self.pos_within_token();
+        self.eat_while(|c| c == '-');
+        let length_opening = self.pos_within_token() - pos;
+
+        // must be ensured by the caller
+        debug_assert!(length_opening >= 3);
+
+        let Some(c) = self.bump() else {
+            return Frontmatter {
+                has_invalid_preceding_whitespace,
+                unclosed: true,
+            };
+        };
+
+        // Optional infostring identifier like `---cargo`
+        if is_id_start(c) {
+            self.eat_while(is_id_continue);
+        }
+
+        // Any whitespace that comes after the opening or the infostring identifier
+        // `---  ` or `---blah  ` is ignored.
+        self.eat_while(|c| c != '\n' && is_whitespace(c));
+
+        // at this point a valid infostring must have a newline already.
+        // If not (in the case of `--- blah` or `---blah blah`, etc), store
+        // for later erroring
+        let has_invalid_infostring = self.first() != '\n';
+
+        let s = self.as_str();
+        s.find(&"-".repeat(length_opening as usize));
+
+        todo!()
     }
 
     fn line_comment(&mut self) -> TokenKind {

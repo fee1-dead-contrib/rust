@@ -8,6 +8,7 @@ pub struct Cursor<'a> {
     len_remaining: usize,
     /// Iterator over chars. Slightly faster than a &str.
     chars: Chars<'a>,
+    pub(crate) frontmatter_allowed: bool,
     #[cfg(debug_assertions)]
     prev: char,
 }
@@ -19,6 +20,7 @@ impl<'a> Cursor<'a> {
         Cursor {
             len_remaining: input.len(),
             chars: input.chars(),
+            frontmatter_allowed: false, // TODO
             #[cfg(debug_assertions)]
             prev: EOF_CHAR,
         }
