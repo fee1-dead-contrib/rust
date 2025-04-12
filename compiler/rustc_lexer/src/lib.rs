@@ -68,6 +68,11 @@ pub enum TokenKind {
     /// Any whitespace character sequence.
     Whitespace,
 
+    Frontmatter {
+        has_invalid_preceding_whitespace: bool,
+        invalid_infostring: bool,
+    },
+
     /// An identifier or keyword, e.g. `ident` or `continue`.
     Ident,
 
@@ -280,7 +285,7 @@ pub fn strip_shebang(input: &str) -> Option<usize> {
 #[inline]
 pub fn validate_raw_str(input: &str, prefix_len: u32) -> Result<(), RawStrError> {
     debug_assert!(!input.is_empty());
-    let mut cursor = Cursor::new(input);
+    let mut cursor = Cursor::new(input, false);
     // Move past the leading `r` or `br`.
     for _ in 0..prefix_len {
         cursor.bump().unwrap();
@@ -290,7 +295,7 @@ pub fn validate_raw_str(input: &str, prefix_len: u32) -> Result<(), RawStrError>
 
 /// Creates an iterator that produces tokens from the input string.
 pub fn tokenize(input: &str) -> impl Iterator<Item = Token> {
-    let mut cursor = Cursor::new(input);
+    let mut cursor = Cursor::new(input, false);
     std::iter::from_fn(move || {
         let token = cursor.advance_token();
         if token.kind != TokenKind::Eof { Some(token) } else { None }
@@ -361,7 +366,27 @@ impl Cursor<'_> {
             Some(c) => c,
             None => return Token::new(TokenKind::Eof, 0),
         };
+
         let token_kind = match first_char {
+            c if self.frontmatter_allowed && is_whitespace(c) => {
+                let mut last = first_char;
+                while is_whitespace(self.first()) {
+                    let Some(c) = self.bump() else { break; };
+                    last = c;
+                }
+                // invalid frontmatter opening as whitespace preceding it isn't newline.
+                // combine the whitespace and the frontmatter to a single token as we shall
+                // error later.
+                if last != '\n' && self.as_str().starts_with("---") {
+                    self.frontmatter(true)
+                } else {
+                    Whitespace
+                }
+            }
+            _ if self.frontmatter_allowed && self.as_str().starts_with("---") => {
+                // happy path
+                self.frontmatter(false)
+            }
             // Slash, comment or block comment.
             '/' => match self.first() {
                 '/' => self.line_comment(),
@@ -464,9 +489,61 @@ impl Cursor<'_> {
             c if !c.is_ascii() && c.is_emoji_char() => self.invalid_ident(),
             _ => Unknown,
         };
+        if self.frontmatter_allowed {
+            self.frontmatter_allowed = matches!(token_kind, Whitespace);
+        }
         let res = Token::new(token_kind, self.pos_within_token());
         self.reset_pos_within_token();
         res
+    }
+
+    fn frontmatter(&mut self, has_invalid_preceding_whitespace: bool) -> TokenKind {
+        let pos = self.pos_within_token();
+        self.eat_while(|c| c == '-');
+        let length_opening = self.pos_within_token() - pos;
+
+        // must be ensured by the caller
+        debug_assert!(length_opening >= 3);
+
+        let s = self.as_str();
+        self.eat_identifier();
+        self.eat_while(|ch| ch != '\n' && is_whitespace(ch));
+        let invalid_infostring = self.first() != '\n';
+
+        if let Some(closing) = s.find(&"-".repeat(length_opening as usize)) {
+            self.bump_bytes(closing);
+            // in case like
+            // ---cargo
+            // --- blahblah
+            // or
+            // ---cargo
+            // ----
+            // combine those stuff into this frontmatter token such that it gets detected later.
+            self.eat_until(b'\n');
+        } else {
+            // recovery strategy:
+            // (1) a closing statement with precending whitespace/newline but not having enough characters
+            //     in this case we eat until there and report a mismatch
+            let mut potential_closing = None;
+            let mut rest = s;
+            while let Some(closing) = rest.find("---") {
+                let preceding_chars_start = rest[..closing].rfind("\n").map_or(0, |i| i + 1);
+                if rest[preceding_chars_start..closing].chars().all(is_whitespace) {
+                    // candidate found
+                    potential_closing = Some(closing);
+                } else {
+                    rest = &rest[closing + 3..];
+                }
+            }
+            if let Some(potential_closing) = potential_closing {
+                self.bump_bytes(potential_closing);
+            } else {
+                // eat everything.
+                self.eat_while(|_| true);
+            }
+        };
+
+        Frontmatter { has_invalid_preceding_whitespace, invalid_infostring }
     }
 
     fn line_comment(&mut self) -> TokenKind {

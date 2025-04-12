@@ -1,0 +1,7 @@
+  ---
+  ---
+
+#![feature(frontmatter)]
+
+fn main() {
+}
