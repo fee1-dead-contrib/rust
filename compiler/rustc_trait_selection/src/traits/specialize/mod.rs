@@ -350,12 +350,14 @@ pub(super) fn specializes(
             return false;
         }
 
-        let const_conditions =
+        // can extract the normalization step into a separate vector when debugging
+        let parent_const_conditions =
             infcx.tcx.const_conditions(parent_impl_def_id).instantiate(infcx.tcx, parent_args);
-        let const_conditions = const_conditions
+        let parent_const_conditions: Vec<_> = parent_const_conditions
             .into_iter()
-            .map(|(trait_ref, span)| (ocx.normalize(cause, param_env, trait_ref), span));
-        ocx.register_obligations(const_conditions.into_iter().map(|(trait_ref, _)| {
+            .map(|(trait_ref, span)| (ocx.normalize(cause, param_env, trait_ref), span))
+            .collect();
+        ocx.register_obligations(parent_const_conditions.iter().copied().map(|(trait_ref, _)| {
             Obligation::new(
                 infcx.tcx,
                 cause.clone(),
@@ -363,17 +365,65 @@ pub(super) fn specializes(
                 trait_ref.to_host_effect_clause(infcx.tcx, ty::BoundConstness::Maybe),
             )
         }));
+        // the const conditions on the parent impl and the specializing impl must be equivalent. This is because
+        // selecting specialized impls using const conditions is not feasible (done during evaluation of candidates,
+        // which does not know about whether its environment wants to evaluate const conditions)
+        let parent_impl_param_env = tcx.param_env(parent_impl_def_id);
+        let parent_impl_trait_header = tcx.impl_trait_header(parent_impl_def_id);
+        let parent_impl_trait_ref = parent_impl_trait_header.trait_ref.instantiate_identity();
+        let parent_impl_trait_ref =
+            ocx.normalize(cause, parent_impl_param_env, parent_impl_trait_ref);
+        let specializing_args = infcx.fresh_args_for_item(DUMMY_SP, specializing_impl_def_id);
+        let specializing_impl_trait_ref = ocx.normalize(
+            cause,
+            parent_impl_param_env,
+            infcx
+                .tcx
+                .impl_trait_ref(specializing_impl_def_id)
+                .instantiate(infcx.tcx, specializing_args),
+        );
+
+        // unify again, this time using the parent impl trait ref to base parameters.
+        let Ok(()) = ocx.eq(
+            cause,
+            parent_impl_param_env,
+            specializing_impl_trait_ref,
+            parent_impl_trait_ref,
+        ) else {
+            return false;
+        };
+        let specializing_const_conditions = infcx
+            .tcx
+            .const_conditions(specializing_impl_def_id)
+            .instantiate(infcx.tcx, specializing_args);
+
+        let specializing_const_conditions: Vec<_> = specializing_const_conditions
+            .into_iter()
+            .map(|(trait_ref, span)| (ocx.normalize(cause, parent_impl_param_env, trait_ref), span))
+            .collect();
+        ocx.register_obligations(specializing_const_conditions.iter().copied().map(
+            |(trait_ref, _)| {
+                Obligation::new(
+                    infcx.tcx,
+                    cause.clone(),
+                    parent_impl_param_env,
+                    trait_ref.to_host_effect_clause(infcx.tcx, ty::BoundConstness::Maybe),
+                )
+            },
+        ));
 
         let errors = ocx.evaluate_obligations_error_on_ambiguity();
         if !errors.is_empty() {
             // no dice!
             debug!(
-                "fulfill_implication: for impls on {:?} and {:?}, \
-                 could not fulfill: {:?} given {:?}",
-                specializing_impl_trait_ref,
-                parent_impl_trait_ref,
-                errors,
-                param_env.caller_bounds()
+                "specializes const conditions fail: for impls on {specializing_impl_trait_ref:?} and {parent_impl_trait_ref:?}\n\
+                errors: {errors:?};\n\
+                forward direction: {:#?} implying {:#?};\n\
+                backward direction: {:#?} implying {:#?}",
+                param_env.caller_bounds(),
+                parent_const_conditions,
+                parent_impl_param_env.caller_bounds(),
+                specializing_const_conditions,
             );
             return false;
         }
