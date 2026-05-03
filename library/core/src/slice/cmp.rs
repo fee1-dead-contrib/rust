@@ -146,7 +146,7 @@ where
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
 impl<A, B> const SlicePartialEq<B> for A
 where
-    A: [const] BytewiseEq<B>,
+    A: [const] PartialEq<B> + BytewiseEq<B>,
 {
     #[inline]
     unsafe fn equal_same_length(lhs: *const Self, rhs: *const B, len: usize) -> bool {
@@ -257,15 +257,14 @@ where
 */
 
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<A: [const] AlwaysApplicableOrd> const SlicePartialOrd for A {
+impl<A: [const] SliceOrd + AlwaysApplicableOrd> const SlicePartialOrd for A {
     fn partial_compare(left: &[A], right: &[A]) -> Option<Ordering> {
         Some(SliceOrd::compare(left, right))
     }
 }
 
 #[rustc_specialization_trait]
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-const trait AlwaysApplicableOrd: [const] SliceOrd + [const] Ord {}
+trait AlwaysApplicableOrd: SliceOrd + Ord {}
 
 macro_rules! always_applicable_ord {
     ($([$($p:tt)*] $t:ty,)*) => {
@@ -321,23 +320,23 @@ impl<A: [const] Ord> const SliceOrd for A {
 /// * For every `x` and `y` of this type, `Ord(x, y)` must return the same
 ///   value as `Ord::cmp(transmute::<_, u8>(x), transmute::<_, u8>(y))`.
 #[rustc_specialization_trait]
-const unsafe trait UnsignedBytewiseOrd: [const] Ord {}
+unsafe trait UnsignedBytewiseOrd: const Ord {}
 
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for bool {}
+unsafe impl UnsignedBytewiseOrd for bool {}
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for u8 {}
+unsafe impl UnsignedBytewiseOrd for u8 {}
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for NonZero<u8> {}
+unsafe impl UnsignedBytewiseOrd for NonZero<u8> {}
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for Option<NonZero<u8>> {}
+unsafe impl UnsignedBytewiseOrd for Option<NonZero<u8>> {}
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for ascii::Char {}
+unsafe impl UnsignedBytewiseOrd for ascii::Char {}
 
 // `compare_bytes` compares a sequence of unsigned bytes lexicographically, so
 // use it if the requirements for `UnsignedBytewiseOrd` are fulfilled.
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<A: [const] Ord + [const] UnsignedBytewiseOrd> const SliceOrd for A {
+impl<A: UnsignedBytewiseOrd> const SliceOrd for A {
     #[inline]
     fn compare(left: &[Self], right: &[Self]) -> Ordering {
         // Since the length of a slice is always less than or equal to
@@ -364,7 +363,7 @@ impl<A: [const] Ord + [const] UnsignedBytewiseOrd> const SliceOrd for A {
 // Don't generate our own chaining loops for `memcmp`-able things either.
 
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<A: [const] PartialOrd + [const] UnsignedBytewiseOrd> const SliceChain for A {
+impl<A: UnsignedBytewiseOrd> const SliceChain for A {
     #[inline]
     fn chaining_lt(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
         match SliceOrd::compare(left, right) {

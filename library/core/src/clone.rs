@@ -280,7 +280,7 @@ pub const trait Clone: Sized {
 // implementations of `TrivialClone`. To keep it from appearing in error
 // messages, make it a `#[marker]` trait.
 #[marker]
-pub const unsafe trait TrivialClone: [const] Clone {}
+pub unsafe trait TrivialClone: Clone {}
 
 /// Derive macro generating an impl of the trait `Clone`.
 #[rustc_builtin_macro]
@@ -618,8 +618,7 @@ mod impls {
 
                 #[doc(hidden)]
                 #[unstable(feature = "trivial_clone", issue = "none")]
-                #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-                unsafe impl const TrivialClone for $t {}
+                unsafe impl TrivialClone for $t {}
             )*
         }
     }
@@ -642,8 +641,7 @@ mod impls {
 
     #[doc(hidden)]
     #[unstable(feature = "trivial_clone", issue = "none")]
-    #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    unsafe impl const TrivialClone for ! {}
+    unsafe impl TrivialClone for ! {}
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
@@ -656,8 +654,7 @@ mod impls {
 
     #[doc(hidden)]
     #[unstable(feature = "trivial_clone", issue = "none")]
-    #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    unsafe impl<T: PointeeSized> const TrivialClone for *const T {}
+    unsafe impl<T: PointeeSized> TrivialClone for *const T {}
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
@@ -670,8 +667,7 @@ mod impls {
 
     #[doc(hidden)]
     #[unstable(feature = "trivial_clone", issue = "none")]
-    #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    unsafe impl<T: PointeeSized> const TrivialClone for *mut T {}
+    unsafe impl<T: PointeeSized> TrivialClone for *mut T {}
 
     /// Shared references can be cloned, but mutable references *cannot*!
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -686,8 +682,7 @@ mod impls {
 
     #[doc(hidden)]
     #[unstable(feature = "trivial_clone", issue = "none")]
-    #[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-    unsafe impl<T: PointeeSized> const TrivialClone for &T {}
+    unsafe impl<T: PointeeSized> TrivialClone for &T {}
 
     /// Shared references can be cloned, but mutable references *cannot*!
     #[stable(feature = "rust1", since = "1.0.0")]

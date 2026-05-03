@@ -149,7 +149,7 @@ impl<T: [const] PartialEq<Other>, Other, const N: usize> const SpecArrayEq<Other
 }
 
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<T: [const] BytewiseEq<U>, U, const N: usize> const SpecArrayEq<U, N> for T {
+impl<T: [const] PartialEq<U> + BytewiseEq<U>, U, const N: usize> const SpecArrayEq<U, N> for T {
     fn spec_eq(a: &[T; N], b: &[U; N]) -> bool {
         // SAFETY: Arrays are compared element-wise, and don't add any padding
         // between elements, so when the elements are `BytewiseEq`, we can
